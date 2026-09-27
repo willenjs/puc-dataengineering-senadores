@@ -1,0 +1,11 @@
+.env
+*.p8
+*.pem
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.superpowers/
+dbt/
+build/

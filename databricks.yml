@@ -1,0 +1,21 @@
+# databricks.yml
+bundle:
+  name: senado_votacoes
+
+artifacts:
+  senado_pipeline:
+    type: whl
+    build: uv build --wheel
+    path: .
+    # Jobs serverless só pegam uma nova implementação de pacote Python customizado quando a
+    # versão muda. dynamic_version carimba a versão do wheel com o timestamp do arquivo, então
+    # código novo em src/ chega ao job sem precisar editar a versão no pyproject.toml.
+    dynamic_version: true
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true

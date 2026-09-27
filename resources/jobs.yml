@@ -1,0 +1,83 @@
+# resources/jobs.yml
+resources:
+  pipelines:
+    medallion_pipeline:
+      name: senado_votacoes_medallion
+      catalog: senado_votacoes
+      schema: bronze
+      serverless: true
+      root_path: "../lakeflow"
+      libraries:
+        - glob:
+            include: ../lakeflow/transformations/**
+
+  jobs:
+    extracao_job:
+      name: senado_votacoes_extracao
+      tasks:
+        - task_key: extracao
+          spark_python_task:
+            python_file: ../scripts/run_extraction.py
+          environment_key: default
+
+        - task_key: pipeline_medallion_apos_extracao
+          depends_on:
+            - task_key: extracao
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.medallion_pipeline.id}
+
+        - task_key: gap_fill_materias
+          depends_on:
+            - task_key: pipeline_medallion_apos_extracao
+          spark_python_task:
+            python_file: ../scripts/run_materias_gap_fill.py
+          environment_key: default
+
+        - task_key: pipeline_medallion_apos_gap_fill
+          depends_on:
+            - task_key: gap_fill_materias
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.medallion_pipeline.id}
+
+        - task_key: llm_scoring
+          depends_on:
+            - task_key: pipeline_medallion_apos_gap_fill
+          spark_python_task:
+            python_file: ../scripts/run_llm_scoring.py
+          environment_key: default
+
+        # Roda em paralelo com llm_scoring: ambos só dependem do estado do Gold logo
+        # após o gap-fill (dim_materia.id_processo já populado) e escrevem em fontes
+        # Bronze diferentes -- não há motivo pra serializar os dois.
+        - task_key: status_processos_fetch
+          depends_on:
+            - task_key: pipeline_medallion_apos_gap_fill
+          spark_python_task:
+            python_file: ../scripts/run_materia_status_fetch.py
+          environment_key: default
+
+        - task_key: pipeline_medallion_apos_scoring
+          depends_on:
+            - task_key: llm_scoring
+            - task_key: status_processos_fetch
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.medallion_pipeline.id}
+
+        - task_key: gerar_dicionario_dados
+          depends_on:
+            - task_key: pipeline_medallion_apos_scoring
+          spark_python_task:
+            python_file: ../scripts/generate_data_dictionary.py
+          environment_key: default
+
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "2"
+            dependencies:
+              - requests>=2.31
+              - python-dotenv>=1.0
+              - databricks-sql-connector>=3.0
+              - anthropic>=0.34
+              - pypdf>=4.0
+              - ../dist/*.whl
